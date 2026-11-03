@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.DS_Store
+
+# tier-3 install artefacts (setup/install.sh)
+third_party/SkyRL/
+third_party/harbor/.venv/
+.venv/
+
+# exp outputs: generated tasks, job configs, checkpoints, harbor job dirs
+runs/
+setup/sft/.venv/
+*.egg-info/
+benchmarks/*/tasks/.venv/
+.env
+
+# internal repo checks
+docs/checks/

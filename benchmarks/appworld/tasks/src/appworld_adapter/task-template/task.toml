@@ -1,0 +1,33 @@
+schema_version = "1.1"
+
+[task]
+name = "stonybrooknlp/appworld__{task_id}"
+authors = [
+    { name = "Harsh Trivedi", email = "harshjtrivedi94@gmail.com" },
+]
+keywords = ["appworld", "{scenario_id}", "coding-agent", "tool-use"]
+
+[metadata]
+difficulty = "{difficulty}"
+category = "interactive_coding"
+
+[verifier]
+timeout_sec = 120.0
+
+[agent]
+timeout_sec = 900.0
+
+[environment]
+build_timeout_sec = 900.0
+cpus = 2
+memory_mb = 2048
+storage_mb = 2048
+docker_image = "{docker_image}"
+# APPWORLD_TASK_ID reaches both the agent's exec() calls and the verifier's
+# exec() calls automatically -- BaseEnvironment._maybe_resolve_task_env merges
+# [environment].env into EVERY exec() on this backend, not just entrypoint.sh
+# (verified against src/harbor/environments/base.py -- see README.md). This
+# is the one piece of per-task information anything running inside the
+# sandbox needs; everything else (APPWORLD_ROOT, the full task/db/ground-truth
+# data) is already baked into the shared image.
+env = { APPWORLD_TASK_ID = "{appworld_task_id}", APPWORLD_EXPERIMENT_NAME = "harbor_trial" }

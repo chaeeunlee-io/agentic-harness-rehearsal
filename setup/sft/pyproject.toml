@@ -1,0 +1,24 @@
+# SFT environment: the library versions both clusters trained with
+# torch 2.9.1 from PyPI ships CUDA 12.8 wheels; the clusters ran the cu129 build. Point uv at
+# https://download.pytorch.org/whl/cu129 if you want that build exactly.
+[project]
+name = "hc-sft-env"
+version = "0"
+requires-python = ">=3.11"
+dependencies = [
+    "torch==2.9.1",
+    "transformers==4.57.6",
+    "trl==0.27.1",
+    "datasets==4.5.0",
+    "tokenizers==0.22.2",
+    "liger-kernel==0.6.4",
+    "bitsandbytes",          # version not recorded on either cluster
+    "accelerate",
+    "pyyaml",
+    "pillow",               # Gemma 3: training with the model's own chat template loads its image processor
+]
+
+[tool.uv]
+package = false
+# Linux + CUDA only (liger-kernel needs triton, which ships Linux wheels only), like the training itself.
+environments = ["sys_platform == 'linux'"]

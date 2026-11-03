@@ -1,0 +1,23 @@
+[project]
+name = "harbor-appworld-adapter"
+version = "0.1.0"
+description = "Harbor adapter for AppWorld (StonyBrookNLP/appworld)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "appworld==0.1.3.post1",
+]
+
+[project.scripts]
+appworld-bench = "appworld_adapter.main:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["appworld_adapter", "appworld_adapter.*"]
+
+[tool.setuptools.package-data]
+appworld_adapter = ["task-template/**/*"]

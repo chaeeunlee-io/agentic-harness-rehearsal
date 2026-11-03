@@ -1,0 +1,53 @@
+name: appworld
+display: AppWorld
+short: AppWorld
+cluster: 1
+splits:
+  test:  {dataset_dir: appworld, task_list: benchmarks/appworld/splits/test.json}
+  train: {dataset_dir: appworld}
+harnesses:
+  trained: [code, fc, mini]
+  heldout: [xml]
+serve: {max_model_len: 32768, reasoning_parser: null, tool_call_parser: hermes}
+eval:
+  n_attempts: 4
+  layer: n4-T0.7
+  aggregate: task_level
+  bootstrap: {B: 1000, seed: 20260923, hi_index: 975, binarize: true}
+  bootstrap_unit: scenario       # 56 scenarios x 3 variants
+  concurrency: 8
+  agent:
+    import_path: benchmarks.appworld.harnesses.harness_dispatch:DispatchAgent
+    provider: hosted_vllm
+    runs_in: sandbox             # the agent runs inside the AppWorld container
+    kwargs: {harness: "appworld-{harness}", api_base: "{sandbox_api_base}", temperature: 0.7, max_steps: 50, max_errors: 40}
+  per_harness:
+    mini:
+      kwargs: {harness: appworld-mini, api_base: "{sandbox_api_base}"}   # mini-swe-agent takes sampling + limits from benchmarks/appworld/harnesses/appworld_mswe.yaml
+      replace_kwargs: true
+  environment: {}                # tasks name their image (task.toml docker_image); build it with benchmarks/appworld/tasks/build_appworld_image.sh
+sft:
+  cudnn_sdp: false
+  args: {epochs: 2, max_len: 32768, liger: true, optim: paged_adamw_8bit}
+# One entry per setting: the key names the pool file benchmarks/appworld/pools/<key>.jsonl,
+# the `arm` column of results/cells.csv, and --pool.
+pools:
+  base:       {paper: Base, file: null}
+  code-only:  {paper: code-only, file: benchmarks/appworld/pools/code-only.jsonl}
+  fc-only:    {paper: fc-only, file: benchmarks/appworld/pools/fc-only.jsonl}
+  mini-only:  {paper: mini-swe-only, file: benchmarks/appworld/pools/mini-only.jsonl}
+  3h:         {paper: 3H, file: benchmarks/appworld/pools/3h.jsonl}
+  3h-matched: {paper: "3H (volume-matched)", file: benchmarks/appworld/pools/3h-matched.jsonl}   # 3h subsampled to 74 rows (the code-only pool's size); no builder shipped
+teacher:   # Qwen3-32B: one greedy attempt per task (experiment base-and-teacher)
+  protocol: {layer: pass1-greedy, n_attempts: 1, temperature: 0.0, job: {agent_timeout_multiplier: 10}}   # the 32B is slow: 10x agent timeout
+collect:   # teacher traces for the pools: exp collect -b appworld (serve the teacher first)
+  model: qwen3-32b
+  split: train
+  n_attempts: 4
+  kwargs: {temperature: 0.6}
+  jobs:   #
+    - {job: teacher-code, harness: code}
+    - {job: teacher-fc,   harness: fc}
+    - {job: teacher-mini, harness: mini}
+build:   # exp build-pool -b appworld [--pool <setting>]: which script writes which settings
+  - {script: build/build_pools.py, env: sft, writes: [3h, code-only, fc-only, mini-only]}

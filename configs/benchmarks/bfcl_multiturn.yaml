@@ -1,0 +1,66 @@
+name: bfcl_multiturn
+display: BFCL multi-turn
+short: BFCL-MT
+cluster: 1
+splits:
+  test:  {dataset_dir: bfcl_multiturn, split_file: benchmarks/bfcl_multiturn/splits/split.json, split_key: test}
+  train: {dataset_dir: bfcl_multiturn, split_file: benchmarks/bfcl_multiturn/splits/split.json, split_key: train}
+  rehearsal: {dataset_dir: bfclmt_drills, generate: [build/gen_rehearsal.py]}   # check with build/qc_rehearsal.py
+harnesses:
+  trained: [fc, json, pycall]
+  heldout: [xml]
+serve: {max_model_len: 32768, reasoning_parser: null, tool_call_parser: hermes}
+eval:
+  n_attempts: 4
+  layer: n4-T0.7
+  aggregate: task_level
+  bootstrap: {B: 1000, seed: 20260923, hi_index: 975, binarize: true}
+  bootstrap_unit: task
+  concurrency: 18
+  agent:
+    import_path: benchmarks.bfcl_multiturn.harnesses.bfclmt_agent:DispatchAgent
+    provider: openai
+    runs_in: sandbox
+    kwargs: {harness: "bfclmt-{harness}", temperature: 0.7}
+    env: {OPENAI_API_BASE: "{sandbox_api_base}", OPENAI_API_KEY: EMPTY}
+  per_harness:
+    pycall: {kwargs: {harness: bfclmt-code}}   # the agent calls the pycall envelope "code"
+  environment: {image: docker.io/library/python:3.10-slim}
+sft:
+  cudnn_sdp: false
+  args: {epochs: 2, max_len: 32768, liger: true, optim: paged_adamw_8bit}
+# One entry per setting: the key names the pool file benchmarks/bfcl_multiturn/pools/<key>.jsonl,
+# the `arm` column of results/cells.csv, and --pool.
+pools:
+  # the v2 students (pools rebuilt after the MathAPI fix), as the paper reports
+  base:        {paper: Base, file: null}
+  fc-only:     {paper: fc-only, file: benchmarks/bfcl_multiturn/pools/fc-only.jsonl}
+  json-only:   {paper: json-only, file: benchmarks/bfcl_multiturn/pools/json-only.jsonl}
+  pycall-only: {paper: pycall-only, file: benchmarks/bfcl_multiturn/pools/pycall-only.jsonl}
+  3h:          {paper: 3H, file: benchmarks/bfcl_multiturn/pools/3h.jsonl}
+  # Cross-harness supervision vs rehearsal (target harness: fc). Task supervision = json + pycall demonstrations; rehearsal appended, not size-matched.
+  json+pycall:          {paper: "Cross-task (json+pycall)", file: benchmarks/bfcl_multiturn/pools/json+pycall.jsonl}
+  reh-fc:               {paper: "Rehearsal (fc)", file: benchmarks/bfcl_multiturn/pools/reh-fc.jsonl}
+  json+pycall+reh-fc:   {paper: "Cross-task + rehearsal", file: benchmarks/bfcl_multiturn/pools/json+pycall+reh-fc.jsonl}
+  # Rehearsal on the held-out harness (heldout-rehearsal-bfclmt) (186 xml rehearsal traces added to 3h)
+  3h+reh-xml:           {paper: "3H + xml rehearsal", file: benchmarks/bfcl_multiturn/pools/3h+reh-xml.jsonl}
+teacher:   # Qwen3-32B: one greedy attempt per task (experiment base-and-teacher)
+  protocol: {layer: pass1-greedy, n_attempts: 1, temperature: 0.0}
+collect:   # teacher traces for the pools: exp collect -b bfcl_multiturn (serve the teacher first)
+  model: qwen3-32b
+  split: train
+  n_attempts: 2
+  kwargs: {temperature: 1.0}
+  # As run, the teacher's traces on the 600 train tasks came from three jobs per harness (150 base, 450 extended,
+  # 76 MathAPI re-run); one job per harness over the full split covers the same tasks.
+  jobs:   #
+    - {job: teacher-fc,     harness: fc}
+    - {job: teacher-json,   harness: json}
+    - {job: teacher-pycall, harness: pycall}
+rehearsal:   # rehearsal traces: a demonstrator on the rehearsal tasks: exp collect -b bfcl_multiturn --rehearsal
+  - {job: rehearsal-fc,  harness: fc,  split: rehearsal, demonstrator: "the 3h SFT checkpoint", n_attempts: 4, kwargs: {temperature: 1.0}}
+  - {job: rehearsal-xml, harness: xml, split: rehearsal, demonstrator: "the 3h SFT checkpoint", n_attempts: 4, kwargs: {temperature: 1.0}}
+build:   # exp build-pool -b bfcl_multiturn [--pool <setting>]: which script writes which settings, in order
+  - {script: build/build_pools.py, writes: [fc-only, json-only, pycall-only, 3h]}
+  - {script: build/build_rehearsal.py, writes: [json+pycall, reh-fc, json+pycall+reh-fc]}
+  - {script: build/build_rehearsal.py, args: [--target, xml], writes: [3h+reh-xml]}

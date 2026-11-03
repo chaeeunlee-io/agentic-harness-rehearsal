@@ -1,0 +1,102 @@
+name: reasoning_gym
+display: Reasoning Gym
+short: RG
+cluster: 2
+splits:
+  test:       {dataset_dir: rg_test96, task_list: benchmarks/reasoning_gym/splits/test.txt, tier: easy}
+  test-hard:  {dataset_dir: rg_test96_hard, tier: hard}
+  train:      {dataset_dir: rg_train_all}            # both tiers (RL)
+  train-easy: {dataset_dir: rg_train192, tier: easy} # teacher traces
+  train-hard: {dataset_dir: rg_train192_hard, tier: hard}
+  rehearsal-t2: {dataset_dir: rg_drills_v1, generate: [build/gen_rehearsal.py]}
+harnesses:
+  trained: [t2, miniswe, goose]
+  heldout: [aider]
+serve:
+  max_model_len: 32768
+  reasoning_parser: deepseek_r1
+  tool_call_parser: hermes
+  per_model:
+    # Gemma (appendix): every harness served with the unified
+    # template (merge-tolerant + Hermes tool calls), since mini-swe and goose rows are tool-call
+    # structured and some do not alternate roles.
+    gemma-3-4b-it: {reasoning_parser: null, chat_template: training/templates/gemma3_rl_unified.jinja2}
+eval:
+  n_attempts: 4
+  layer: {t2: n4-T0.6, default: n4-gencfg-default}   # released agents use their own generation config
+  aggregate: pooled
+  bootstrap: {B: 1000, seed: 20260923, hi_index: 974, binarize: false}   # graded reward; task-level percentile bootstrap
+  bootstrap_unit: task
+  concurrency: 10
+  agent: {}
+  per_harness:
+    t2:
+      name: terminus-2
+      provider: hosted_vllm
+      runs_in: host
+      kwargs:
+        api_base: "{api_base}"
+        temperature: 0.6
+        model_info: {input_cost_per_token: 0.0, max_input_tokens: 20480, max_output_tokens: 8192, output_cost_per_token: 0.0}
+    miniswe:
+      import_path: benchmarks.mini_swe_agent:PinnedMiniSweAgent   # mini-swe-agent 2.4.6, litellm pinned
+      provider: openai
+      runs_in: sandbox
+      env: {OPENAI_API_BASE: "{sandbox_api_base}"}
+      job: {agent_timeout_multiplier: 3.0}
+    goose:
+      name: goose
+      provider: openai
+      runs_in: sandbox
+      env: {OPENAI_HOST: "{sandbox_host}", OPENAI_BASE_PATH: v1/chat/completions}
+    aider:
+      name: aider
+      provider: openai/openai      # aider's litellm needs the doubled prefix (as run)
+      runs_in: sandbox
+      env: {OPENAI_API_BASE: "{sandbox_api_base}"}
+sft:
+  cudnn_sdp: true
+  chat_template: {gemma-3-4b-it: training/templates/gemma3_rl_unified.jinja2}   # every Gemma RG arm (training logs)
+  args: {epochs: 2, max_len: 32768, liger: true, optim: paged_adamw_8bit}
+# One entry per setting: the key names the pool file benchmarks/reasoning_gym/pools/<key>.jsonl,
+# the `arm` column of results/cells.csv, and --pool. Gemma trained on these same files.
+pools:
+  base:           {paper: Base, file: null}
+  # Specialists vs 3H
+  t2-only:        {paper: Terminus-2-only, file: benchmarks/reasoning_gym/pools/t2-only.jsonl}
+  miniswe-only:   {paper: mini-swe-only, file: benchmarks/reasoning_gym/pools/miniswe-only.jsonl}
+  goose-only:     {paper: Goose-only, file: benchmarks/reasoning_gym/pools/goose-only.jsonl}
+  3h:             {paper: 3H, file: benchmarks/reasoning_gym/pools/3h.jsonl}
+  # Cross-harness supervision vs rehearsal (target t2; RG rehearsal = transcribing a provided answer)
+  miniswe+goose:  {paper: "Cross-task (miniswe+goose)", file: benchmarks/reasoning_gym/pools/miniswe+goose.jsonl}
+  reh-t2:         {paper: "Rehearsal (t2)", file: benchmarks/reasoning_gym/pools/reh-t2.jsonl}
+  miniswe+goose+reh-t2: {paper: "Cross-task + rehearsal", file: benchmarks/reasoning_gym/pools/miniswe+goose+reh-t2.jsonl}
+teacher:
+  protocol: {}
+rl:
+  init_pool: 3h
+  band: benchmarks/reasoning_gym/splits/band.json
+  train_dir: rg_train_all
+  rollouts_matched: {multi_harness_epochs: 1, single_harness_epochs: 3}
+  agent_import_path: benchmarks.reasoning_gym.harnesses.harness_dispatch:DispatchAgent
+  harness_kwargs:
+    t2: {model_info: {max_input_tokens: 24576, max_output_tokens: 8192, input_cost_per_token: 0.0, output_cost_per_token: 0.0}}
+  extra_overrides: {harbor_trial_config.agent_timeout_multiplier: 3.0}
+collect:   # teacher traces for the pools: exp collect -b reasoning_gym (serve the teacher first)
+  model: qwen3-32b
+  n_attempts: 4
+  kwargs: {}
+  per_harness:
+    miniswe: {job_drop: [agent_timeout_multiplier]}   # the teacher's traces were collected without the eval's 3x timeout
+  jobs:   #
+    - {job: teacher-easy-t2,      harness: t2,      split: train-easy}
+    - {job: teacher-easy-miniswe, harness: miniswe, split: train-easy}
+    - {job: teacher-easy-goose,   harness: goose,   split: train-easy}
+    - {job: teacher-hard-t2,      harness: t2,      split: train-hard}
+    - {job: teacher-hard-miniswe, harness: miniswe, split: train-hard}
+    - {job: teacher-hard-goose,   harness: goose,   split: train-hard}
+rehearsal:   # rehearsal traces: a demonstrator on the rehearsal tasks: exp collect -b reasoning_gym --rehearsal
+  - {job: rehearsal-t2, harness: t2, split: rehearsal-t2, demonstrator: "the 3h SFT checkpoint", n_attempts: 4, kwargs: {temperature: 1.0}}
+build:   # exp build-pool -b reasoning_gym [--pool <setting>]: which script writes which settings, in order
+  - {script: build/build_pools.py, env: sft, writes: [3h, t2-only, miniswe-only, goose-only], options: [min-trajectories]}
+  - {script: build/build_rehearsal.py, writes: [miniswe+goose, miniswe+goose+reh-t2, reh-t2]}

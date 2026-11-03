@@ -1,0 +1,132 @@
+{
+  "_comment": "Golden cases for the FHIR kernel. 'arm' holds only non-stock knobs. Every knob has (a) an identity case under the stock arm and (b) at least one behaviour case. tests/unit/test_harness_fhir_kernel.py runs these.",
+  "request_cases": [
+    {
+      "id": "stock-identity-url",
+      "arm": {},
+      "url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG&_sort=-date&_format=json",
+      "expect_url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG&_sort=-date&_format=json",
+      "expect_synthetic": false
+    },
+    {
+      "id": "sort-ignored-strips-param",
+      "arm": {"sort_support": "ignored"},
+      "url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG&_sort=-date&_format=json",
+      "expect_url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG&_format=json",
+      "expect_synthetic": false
+    },
+    {
+      "id": "sort-ignored-param-last",
+      "arm": {"sort_support": "ignored"},
+      "url": "http://localhost:8080/fhir/Observation?code=MG&_sort=-date",
+      "expect_url": "http://localhost:8080/fhir/Observation?code=MG",
+      "expect_synthetic": false
+    },
+    {
+      "id": "count-injected",
+      "arm": {"bundle_count": 10},
+      "url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG",
+      "expect_url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG&_count=10",
+      "expect_synthetic": false
+    },
+    {
+      "id": "count-not-doubled",
+      "arm": {"bundle_count": 10},
+      "url": "http://localhost:8080/fhir/Observation?code=MG&_count=50",
+      "expect_url": "http://localhost:8080/fhir/Observation?code=MG&_count=50",
+      "expect_synthetic": false
+    },
+    {
+      "id": "qualified-bare-code-goes-empty",
+      "arm": {"code_system_form": "qualified"},
+      "url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG&_format=json",
+      "expect_url": "http://localhost:8080/fhir/Observation?patient=S3032536&code=MG&_format=json",
+      "expect_synthetic": true
+    },
+    {
+      "id": "qualified-piped-code-translated-to-bare",
+      "arm": {"code_system_form": "qualified"},
+      "url": "http://localhost:8080/fhir/Observation?code=http://loinc.org|MG&_format=json",
+      "expect_url": "http://localhost:8080/fhir/Observation?code=MG&_format=json",
+      "expect_synthetic": false
+    },
+    {
+      "id": "qualified-urlencoded-pipe-translated",
+      "arm": {"code_system_form": "qualified"},
+      "url": "http://localhost:8080/fhir/Observation?code=http%3A%2F%2Floinc.org%7CMG",
+      "expect_url": "http://localhost:8080/fhir/Observation?code=MG",
+      "expect_synthetic": false
+    },
+    {
+      "id": "qualified-no-code-param-untouched",
+      "arm": {"code_system_form": "qualified"},
+      "url": "http://localhost:8080/fhir/Patient?name=Peter&_format=json",
+      "expect_url": "http://localhost:8080/fhir/Patient?name=Peter&_format=json",
+      "expect_synthetic": false
+    }
+  ],
+  "response_cases": [
+    {
+      "id": "stock-identity-response",
+      "arm": {},
+      "check": "identity"
+    },
+    {
+      "id": "trimmed-drops-bloat-keeps-values",
+      "arm": {"response_verbosity": "trimmed"},
+      "check": "trimmed"
+    },
+    {
+      "id": "link-stripped-removes-next-keeps-self",
+      "arm": {"link_stripped": true},
+      "check": "link_stripped"
+    },
+    {
+      "id": "truncation-cuts-with-marker",
+      "arm": {"max_fhir_chars": 120},
+      "check": "truncated"
+    },
+    {
+      "id": "trimmed-non-json-identity",
+      "arm": {"response_verbosity": "trimmed"},
+      "check": "non_json_identity"
+    }
+  ],
+  "sample_bundle": {
+    "resourceType": "Bundle",
+    "type": "searchset",
+    "total": 2,
+    "meta": {"lastUpdated": "2023-11-13T10:15:00+00:00"},
+    "link": [
+      {"relation": "self", "url": "http://localhost:8080/fhir/Observation?code=MG"},
+      {"relation": "next", "url": "http://localhost:8080/fhir/Observation?code=MG&page=2"}
+    ],
+    "entry": [
+      {
+        "fullUrl": "http://localhost:8080/fhir/Observation/obs-1",
+        "resource": {
+          "resourceType": "Observation",
+          "id": "obs-1",
+          "meta": {"versionId": "1"},
+          "text": {"status": "generated", "div": "<div>Magnesium 1.9 mg/dL</div>"},
+          "extension": [{"url": "http://example.org/x", "valueString": "bloat"}],
+          "status": "final",
+          "code": {"coding": [{"code": "MG"}]},
+          "effectiveDateTime": "2023-11-13T04:00:00+00:00",
+          "valueQuantity": {"value": 1.9, "unit": "mg/dL"}
+        }
+      },
+      {
+        "fullUrl": "http://localhost:8080/fhir/Observation/obs-2",
+        "resource": {
+          "resourceType": "Observation",
+          "id": "obs-2",
+          "status": "final",
+          "code": {"coding": [{"code": "MG"}]},
+          "effectiveDateTime": "2023-11-12T04:00:00+00:00",
+          "valueQuantity": {"value": 2.1, "unit": "mg/dL"}
+        }
+      }
+    ]
+  }
+}

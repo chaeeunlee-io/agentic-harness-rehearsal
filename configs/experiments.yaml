@@ -1,0 +1,90 @@
+# Reported experiments, named by setting.
+# `exp plan <experiment>` prints the required commands.
+# `exp table <experiment>` rebuilds results from completed runs, or from
+# `results/cells.csv` with `--shipped`.
+#
+# Each setting specifies model, benchmark, training dataset(s), and evaluation
+# harnesses. `harnesses` may be `trained`, `heldout`, `all`, or an explicit list.
+# `rl: [x, ...]` adds GRPO-from-3h runs with rollouts on x: one harness, or `3h`
+# for all three training harnesses.
+
+specialists-vs-3h:
+  title: "single-harness specialists vs 3H, on the training harnesses"
+  settings:
+    - {benchmark: medagentbench,  model: qwen3-4b, pools: [base, parity-only, t2-only, fc-only, 3h], harnesses: trained}
+    - {benchmark: appworld,       model: qwen3-4b, pools: [base, code-only, fc-only, mini-only, 3h], harnesses: trained}
+    - {benchmark: bfcl_multiturn, model: qwen3-4b, pools: [base, fc-only, json-only, pycall-only, 3h], harnesses: trained}
+    - {benchmark: reasoning_gym,  model: qwen3-4b, pools: [base, t2-only, miniswe-only, goose-only, 3h], harnesses: trained, split: test-hard}
+heldout-transfer:
+  title: "the same policies on the held-out harness"
+  settings:
+    - {benchmark: medagentbench,   model: qwen3-4b, pools: [base, parity-only, t2-only, fc-only, 3h], harnesses: heldout}
+    - {benchmark: appworld,        model: qwen3-4b, pools: [base, code-only, fc-only, mini-only, 3h], harnesses: heldout}
+    - {benchmark: bfcl_multiturn,  model: qwen3-4b, pools: [base, fc-only, json-only, pycall-only, 3h], harnesses: heldout}
+    - {benchmark: bfcl_singleturn, model: qwen3-4b, pools: [base, fc-only, json-only, t2-only, 3h], harnesses: heldout}
+    - {benchmark: reasoning_gym,   model: qwen3-4b, pools: [base, t2-only, miniswe-only, goose-only, 3h], harnesses: heldout, split: test}
+    - {benchmark: reasoning_gym,   model: qwen3-4b, pools: [base, t2-only, miniswe-only, goose-only, 3h], harnesses: heldout, split: test-hard}
+cross-harness-vs-rehearsal:
+  title: "cross-harness task supervision x target-harness rehearsal"
+  # rows per benchmark: base, cross-task, rehearsal-only, cross-task + rehearsal, target-only, 3H
+  settings:
+    - {benchmark: medagentbench,  model: qwen3-4b, pools: [base, parity+fc, reh-t2, parity+fc+reh-t2, t2-only, 3h], harnesses: trained, target: t2}
+    - {benchmark: reasoning_gym,  model: qwen3-4b, pools: [base, miniswe+goose, reh-t2, miniswe+goose+reh-t2, t2-only, 3h], harnesses: trained, target: t2, split: test}
+    - {benchmark: bfcl_multiturn, model: qwen3-4b, pools: [base, json+pycall, reh-fc, json+pycall+reh-fc, fc-only, 3h], harnesses: trained, target: fc}
+grpo-3h-vs-single:
+  title: "3H GRPO vs single-harness GRPO, from the 3H SFT checkpoint"
+  # As published, the 3H-SFT and 3H-GRPO rows' CIs came from the pass@k script (trial-pooled
+  # bootstrap statistic) and the single-harness rows' from the main bootstrap (mean of task
+  # means): half-widths differ by <= 0.1 between the two. `ci:` reproduces each row as published.
+  settings:
+    - {benchmark: medagentbench, model: qwen3-4b, rl: ["3h", parity],  harnesses: all, ci: {"3h": trial_pooled, "rl:3h": trial_pooled}}
+    - {benchmark: reasoning_gym, model: qwen3-4b, rl: ["3h", miniswe], harnesses: all, split: test, ci: {"3h": trial_pooled, "rl:3h": trial_pooled}}
+    - {benchmark: reasoning_gym, model: qwen3-4b, rl: ["3h", miniswe], harnesses: all, split: test-hard, ci: {"3h": trial_pooled, "rl:3h": trial_pooled}}
+base-and-teacher:
+  title: "the base model and the teacher, per harness"
+  settings:
+    - {benchmark: medagentbench,   model: qwen3-4b, pools: [base], harnesses: trained}
+    - {benchmark: appworld,        model: qwen3-4b, pools: [base], harnesses: trained}
+    - {benchmark: bfcl_multiturn,  model: qwen3-4b, pools: [base], harnesses: trained}
+    - {benchmark: bfcl_singleturn, model: qwen3-4b, pools: [base], harnesses: trained}
+    - {benchmark: reasoning_gym,   model: qwen3-4b, pools: [base], harnesses: trained, split: test}
+    - {benchmark: medagentbench,   model: qwen3-32b, teacher: true, harnesses: trained}
+    - {benchmark: reasoning_gym,   model: qwen3-32b, teacher: true, harnesses: trained, split: test}
+    - {benchmark: reasoning_gym,   model: qwen3-32b, teacher: true, harnesses: trained, split: test-hard}
+    - {benchmark: bfcl_multiturn,  model: qwen3-32b, teacher: true, harnesses: trained}
+    - {benchmark: bfcl_singleturn, model: qwen3-32b, teacher: true, harnesses: trained}
+    - {benchmark: appworld,        model: qwen3-32b, teacher: true, harnesses: trained}
+
+matched-volume-mab:
+  title: "3H at matched data volume"
+  settings:
+    - {benchmark: medagentbench, model: qwen3-4b, pools: [parity-only, fc-only, 3h-n108, 3h-n108-s2, 3h-n108-s3, 3h-n108-cov, 3h-n150, 3h-n150-cov, 3h], harnesses: trained}
+specialists-vs-3h-bfclst-rgeasy:
+  title: "single-harness specialists vs 3H, on the training harnesses"
+  settings:
+    - {benchmark: bfcl_singleturn, model: qwen3-4b, pools: [base, fc-only, json-only, t2-only, 3h], harnesses: trained}
+    - {benchmark: reasoning_gym,   model: qwen3-4b, pools: [base, t2-only, miniswe-only, goose-only, 3h], harnesses: trained, split: test}
+all-conditions-mab:
+  title: "every SFT and GRPO condition"
+  settings:
+    - {benchmark: medagentbench, model: qwen3-4b, harnesses: all, rl: ["3h", parity],
+       pools: [base, parity-only, t2-only, fc-only, 3h, parity+fc, reh-t2, parity+fc+reh-t2, parity+fc+reh-t2-32b,
+               reh-t2-fail, parity+t2, reh-fc, parity+t2+reh-fc]}
+gemma-mab:
+  title: "Gemma-3-4B-it replication, SFT and GRPO"
+  settings:
+    - {benchmark: medagentbench, model: gemma-3-4b-it, harnesses: all, rl: ["3h"],
+       pools: [base, parity-only, t2-only, fc-only, reh-t2, reh-t2-fail, parity+reh-t2, parity+t2, reh-fc-gemma,
+               parity+t2+reh-fc-gemma, 3h]}
+gemma-rg-easy:
+  title: "Gemma-3-4B-it replication, SFT"
+  settings:
+    - {benchmark: reasoning_gym, model: gemma-3-4b-it, pools: [base, t2-only, miniswe-only, goose-only, 3h], harnesses: all, split: test}
+rehearsal-all-harnesses-bfclmt:
+  title: "rehearsal on each of the three training harnesses"
+  settings:
+    - {benchmark: bfcl_multiturn, model: qwen3-4b, pools: [base, json+pycall, reh-fc, json+pycall+reh-fc, fc-only, 3h], harnesses: trained, target: fc}
+heldout-rehearsal-bfclmt:
+  title: "rehearsal on the held-out harness, which no pool contains"
+  settings:
+    - {benchmark: bfcl_multiturn, model: qwen3-4b, pools: [3h, 3h+reh-xml], harnesses: trained}

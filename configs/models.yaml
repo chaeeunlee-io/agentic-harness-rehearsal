@@ -1,0 +1,15 @@
+# Base models and teacher. `chat_template` is used both for SFT and for serving the
+# trained student; null = the model's own template.
+qwen3-4b:
+  hf: Qwen/Qwen3-4B
+  chat_template: training/templates/qwen3_acc_thinking.jinja2
+  role: student
+qwen3-32b:
+  hf: Qwen/Qwen3-32B
+  chat_template: null
+  role: teacher
+  serve: {tensor_parallel_size: 2}
+gemma-3-4b-it:          # the Gemma replication (experiments gemma-mab, gemma-rg-easy)
+  hf: google/gemma-3-4b-it
+  chat_template: training/templates/gemma3_hermes_fc.jinja2
+  role: student

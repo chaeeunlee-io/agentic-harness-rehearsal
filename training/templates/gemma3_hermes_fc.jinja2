@@ -1,0 +1,88 @@
+{#- Gemma-3 chat template EXTENDED for hermes-style function calling.
+    Base structure (system-fold, bos, <start_of_turn>role, <end_of_turn>) is
+    Gemma-3's OWN shipped template, copied verbatim -- untouched Qwen files,
+    new standalone file. Extensions, both additive (Gemma's default template
+    has no tool-call/tool-role handling at all -- it errors on them):
+      1. assistant messages with a `tool_calls` field: append each call
+         rendered as <tool_call>{"name":...,"arguments":...}</tool_call>,
+         matching hermes_tool_parser's plain-text-tag convention (same
+         convention Qwen's own shipped template already produces, and the
+         SAME parser -- vllm --tool-call-parser hermes -- can read regardless
+         of which model produced the text, since it's decoded-text pattern
+         matching, not model-specific special tokens).
+      2. role="tool" messages: folded into a synthetic "user" turn wrapped in
+         <tool_response>...</tool_response>, preserving Gemma's strict
+         user/model alternation requirement (raise_exception otherwise). #}
+{{ bos_token }}
+{%- if messages[0]['role'] == 'system' -%}
+    {%- if messages[0]['content'] is string -%}
+        {%- set first_user_prefix = messages[0]['content'] + '
+
+' -%}
+    {%- else -%}
+        {%- set first_user_prefix = messages[0]['content'][0]['text'] + '
+
+' -%}
+    {%- endif -%}
+    {%- set loop_messages = messages[1:] -%}
+{%- else -%}
+    {%- set first_user_prefix = "" -%}
+    {%- set loop_messages = messages -%}
+{%- endif -%}
+{#- fold role="tool" into "user" for alternation purposes only (rendering
+    below still wraps its content distinctly in <tool_response> tags) #}
+{%- set ns = namespace(prev_role=none) -%}
+{%- for message in loop_messages -%}
+    {%- set eff_role = "user" if message['role'] == 'tool' else message['role'] -%}
+    {%- if (eff_role == 'user') != (loop.index0 % 2 == 0) -%}
+        {{ raise_exception("Conversation roles must alternate user/assistant/user/assistant/... (after tool->user folding)") }}
+    {%- endif -%}
+    {%- if (eff_role == 'assistant') -%}
+        {%- set role = "model" -%}
+    {%- else -%}
+        {%- set role = eff_role -%}
+    {%- endif -%}
+    {{ '<start_of_turn>' + role + '
+' + (first_user_prefix if loop.first else "") }}
+    {%- if message['role'] == 'tool' -%}
+        {{ '<tool_response>
+' + ((message['content'] or '') | trim) + '
+</tool_response>' }}
+    {%- elif message['content'] is none or message['content'] is not defined -%}
+        {#- live assistant tool-call messages often have content: null -#}
+        {{ '' }}
+    {%- elif message['content'] is string -%}
+        {{ message['content'] | trim }}
+    {%- elif message['content'] is iterable -%}
+        {%- for item in message['content'] -%}
+            {%- if item['type'] == 'image' -%}
+                {{ '<start_of_image>' }}
+            {%- elif item['type'] == 'text' -%}
+                {{ item['text'] | trim }}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- else -%}
+        {{ raise_exception("Invalid content type") }}
+    {%- endif -%}
+    {%- if message['role'] == 'assistant' and message['tool_calls'] is defined and message['tool_calls'] -%}
+        {%- for tc in message['tool_calls'] -%}
+            {#- TRAINING rows carry arguments as a JSON string (serialized when the traces were collected);
+                LIVE multi-turn requests echo them back as a parsed dict. Coerce:
+                str stays as-is, anything else goes through tojson. This mismatch
+                crashed every multi-turn fc render (str + dict TypeError -> 400)
+                before 2026-09-15; single-turn calls never hit this branch, which
+                is why the smoke test passed. -#}
+            {%- set tc_args = tc['function']['arguments'] if tc['function']['arguments'] is string else tc['function']['arguments'] | tojson -%}
+            {{ '
+<tool_call>
+{"name": "' + tc['function']['name'] + '", "arguments": ' + tc_args + '}
+</tool_call>' }}
+        {%- endfor -%}
+    {%- endif -%}
+    {{ '<end_of_turn>
+' }}
+{%- endfor -%}
+{%- if add_generation_prompt -%}
+    {{'<start_of_turn>model
+'}}
+{%- endif -%}

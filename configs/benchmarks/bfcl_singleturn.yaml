@@ -1,0 +1,55 @@
+name: bfcl_singleturn
+display: BFCL single-turn
+short: BFCL-ST
+cluster: 1
+splits:
+  test:  {dataset_dir: bfcl_singleturn, split_file: benchmarks/bfcl_singleturn/splits/split.json, split_key: test}
+  train: {dataset_dir: bfcl_singleturn, split_file: benchmarks/bfcl_singleturn/splits/split.json, split_key: train}
+harnesses:
+  trained: [fc, json, t2]
+  heldout: [xml]
+serve: {max_model_len: 32768, reasoning_parser: null, tool_call_parser: hermes}
+eval:
+  n_attempts: 1
+  layer: pass1-greedy
+  aggregate: task_level
+  bootstrap: {B: 1000, seed: 20260923, hi_index: 975, binarize: true}    # task-level percentile bootstrap
+  bootstrap_unit: task
+  concurrency: 10
+  agent:
+    import_path: benchmarks.bfcl_singleturn.harnesses.harness_dispatch:DispatchAgent
+    provider: openai
+    runs_in: sandbox
+    kwargs: {harness: "bfcl-{harness}", temperature: 0.0}
+    env: {OPENAI_API_BASE: "{sandbox_api_base}", OPENAI_API_KEY: EMPTY}
+  per_harness:
+    t2:
+      runs_in: host                      # Terminus-2 is an orchestrator-side agent
+      env: {}
+      kwargs: {model_info: {input_cost_per_token: 0.0, max_input_tokens: 32768, max_output_tokens: 4096, output_cost_per_token: 0.0}}
+  environment: {image: docker.io/library/python:3.10-slim}   # EIDF ran this image; Docker builds the task Dockerfile (same base + build-essential)
+sft:   # cluster 1: cuDNN SDPA disabled, then training/sft_train.py unmodified
+  cudnn_sdp: false
+  args: {epochs: 2, max_len: 32768, liger: true, optim: paged_adamw_8bit}
+# One entry per setting: the key names the pool file benchmarks/bfcl_singleturn/pools/<key>.jsonl,
+# the `arm` column of results/cells.csv, and --pool.
+pools:
+  base:      {paper: Base, file: null}
+  fc-only:   {paper: fc-only, file: benchmarks/bfcl_singleturn/pools/fc-only.jsonl}
+  json-only: {paper: json-only, file: benchmarks/bfcl_singleturn/pools/json-only.jsonl}
+  t2-only:   {paper: Terminus-2-only, file: benchmarks/bfcl_singleturn/pools/t2-only.jsonl}
+  3h:        {paper: 3H, file: benchmarks/bfcl_singleturn/pools/3h.jsonl}
+teacher: {protocol: {}}   # t2 was never run for the teacher
+collect:   # teacher traces for the pools: exp collect -b bfcl_singleturn (serve the teacher first)
+  model: qwen3-32b
+  split: train
+  n_attempts: 1
+  kwargs: {temperature: 1.0}
+  # As run, a second pass (harv2, t2harv2) re-ran only the tasks the first left unsolved;
+  # one job per harness over the full split covers the same tasks.
+  jobs:   #
+    - {job: teacher-fc,   harness: fc}
+    - {job: teacher-json, harness: json}
+    - {job: teacher-t2,   harness: t2}
+build:   # exp build-pool -b bfcl_singleturn [--pool <setting>]: which script writes which settings
+  - {script: build/build_pools.py, writes: [fc-only, json-only, t2-only, 3h]}

@@ -1,0 +1,76 @@
+{#- Gemma-3 chat template, ALTERNATION-TOLERANT (2026-09-15).
+    Base structure is Gemma-3's shipped template. One behavioral change:
+    instead of raise_exception on non-alternating roles, consecutive
+    same-role messages are MERGED into a single turn (joined by a blank
+    line). Motivation: Terminus-2's summarization/handoff flow legitimately
+    sends runs of consecutive assistant messages (copied context); Gemma's
+    stock template 400s the whole request server-side, killing episodes at
+    a rate correlated with how often an arm triggers summarization -- a
+    treatment-correlated measurement bias. Merging renders byte-identical
+    output to the stock template on already-alternating conversations
+    (validated at build time). role="tool" is folded into "user" for
+    grouping and its content wrapped in <tool_response> tags. -#}
+{{ bos_token }}
+{%- if messages[0]['role'] == 'system' -%}
+    {%- if messages[0]['content'] is string -%}
+        {%- set first_user_prefix = messages[0]['content'] + '
+
+' -%}
+    {%- else -%}
+        {%- set first_user_prefix = messages[0]['content'][0]['text'] + '
+
+' -%}
+    {%- endif -%}
+    {%- set loop_messages = messages[1:] -%}
+{%- else -%}
+    {%- set first_user_prefix = "" -%}
+    {%- set loop_messages = messages -%}
+{%- endif -%}
+{%- set ns = namespace(prev='') -%}
+{%- for message in loop_messages -%}
+    {%- set eff = 'model' if message['role'] == 'assistant' else 'user' -%}
+    {%- if message['content'] is string -%}
+        {%- set body = message['content'] | trim -%}
+    {%- elif message['content'] is none or message['content'] is not defined -%}
+        {%- set body = '' -%}
+    {%- elif message['content'] is iterable -%}
+        {%- set parts = namespace(t='') -%}
+        {%- for item in message['content'] -%}
+            {%- if item['type'] == 'image' -%}
+                {%- set parts.t = parts.t + '<start_of_image>' -%}
+            {%- elif item['type'] == 'text' -%}
+                {%- set parts.t = parts.t + (item['text'] | trim) -%}
+            {%- endif -%}
+        {%- endfor -%}
+        {%- set body = parts.t -%}
+    {%- else -%}
+        {{ raise_exception("Invalid content type") }}
+    {%- endif -%}
+    {%- if message['role'] == 'tool' -%}
+        {%- set body = '<tool_response>
+' + body + '
+</tool_response>' -%}
+    {%- endif -%}
+    {%- if eff != ns.prev -%}
+        {%- if not loop.first -%}
+            {{ '<end_of_turn>
+' }}
+        {%- endif -%}
+        {{ '<start_of_turn>' + eff + '
+' + (first_user_prefix if loop.first else "") }}
+    {%- else -%}
+        {{ '
+
+' }}
+    {%- endif -%}
+    {{ body }}
+    {%- set ns.prev = eff -%}
+{%- endfor -%}
+{%- if loop_messages -%}
+    {{ '<end_of_turn>
+' }}
+{%- endif -%}
+{%- if add_generation_prompt -%}
+    {{'<start_of_turn>model
+'}}
+{%- endif -%}
